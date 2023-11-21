@@ -82,32 +82,36 @@ func CreateLog(ctx context.Context, config *Config) error {
 	if err != nil {
 		return err
 	}
-
 	return config.Backend.Upload(ctx, "checkpoint", checkpoint)
 }
 
 func LoadLog(ctx context.Context, config *Config) (*Log, error) {
 	pkix, err := x509.MarshalPKIXPublicKey(config.Key.Public())
+	fmt.Println("1")
 	if err != nil {
 		return nil, err
 	}
 	logID := sha256.Sum256(pkix)
 
 	sth, err := config.Backend.Fetch(ctx, "checkpoint")
+	fmt.Println("2")
 	if err != nil {
 		return nil, err
 	}
 	v, err := tlogx.NewRFC6962Verifier(config.Name, config.Key.Public())
+	fmt.Println(note.VerifierList(v))
 	if err != nil {
 		return nil, err
 	}
 	var timestamp int64
 	v.Timestamp = func(t uint64) { timestamp = int64(t) }
 	n, err := note.Open(sth, note.VerifierList(v))
+	fmt.Println("3")
 	if err != nil {
 		return nil, err
 	}
 	c, err := tlogx.ParseCheckpoint(n.Text)
+	fmt.Println("4")
 	if err != nil {
 		return nil, err
 	}
@@ -122,6 +126,7 @@ func LoadLog(ctx context.Context, config *Config) (*Log, error) {
 	if c.Extension != "" {
 		return nil, fmt.Errorf("unexpected STH extension %q", c.Extension)
 	}
+	fmt.Println("5")
 
 	edgeTiles := make(map[int]tileWithBytes)
 	if c.N > 0 {
@@ -167,6 +172,7 @@ func LoadLog(ctx context.Context, config *Config) (*Log, error) {
 		}
 	}
 
+	fmt.Println("6")
 	return &Log{
 		c:           config,
 		logID:       logID,

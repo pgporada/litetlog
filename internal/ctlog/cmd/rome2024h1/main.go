@@ -18,7 +18,6 @@ import (
 	"github.com/google/certificate-transparency-go/x509util"
 	"github.com/prometheus/client_golang/prometheus"
 	"github.com/prometheus/client_golang/prometheus/promhttp"
-	"golang.org/x/crypto/acme/autocert"
 )
 
 func main() {
@@ -26,7 +25,7 @@ func main() {
 	ctx, stop := signal.NotifyContext(context.Background(), os.Interrupt)
 	defer stop()
 
-	b, err := ctlog.NewS3Backend(ctx, "us-east-2", "rome2024h1")
+	b, err := ctlog.NewMinioBackend(ctx, "us-east-2", "rome2024h1")
 	if err != nil {
 		log.Fatal(err)
 	}
@@ -47,7 +46,7 @@ func main() {
 		log.Fatal(err)
 	}
 	c := &ctlog.Config{
-		Name:          "rome.ct.filippo.io/2024h1",
+		Name:          "127.0.0.1:9000/2024h1",
 		Key:           k.(crypto.Signer),
 		Backend:       b,
 		Log:           slog.Default(),
@@ -55,7 +54,8 @@ func main() {
 		NotAfterStart: time.Date(2024, time.January, 1, 0, 0, 0, 0, time.UTC),
 		NotAfterLimit: time.Date(2024, time.July, 1, 0, 0, 0, 0, time.UTC),
 	}
-
+	metricsPrefix := flag.String("metricsPrefix", "litetlog_", "String value to preface all metrics with. E.g. litetlog_<metric>")
+	//backendType := flag.String("backendType", "minio", "The storage backend to use: [s3|minio]")
 	createFlag := flag.Bool("create", false, "create the log")
 	flag.Parse()
 	if *createFlag {
@@ -70,9 +70,12 @@ func main() {
 	}
 
 	metrics := prometheus.NewRegistry()
-	prometheus.WrapRegistererWith(prometheus.Labels{
-		"log": "rome2024h1",
-	}, metrics).MustRegister(l.Metrics()...)
+	prometheus.WrapRegistererWith(
+		prometheus.Labels{
+			"log": "rome2024h1",
+		},
+		prometheus.WrapRegistererWithPrefix(*metricsPrefix, metrics),
+	).MustRegister(l.Metrics()...)
 
 	mux := http.NewServeMux()
 	mux.HandleFunc("/debug/pprof/", pprof.Index)
@@ -85,22 +88,24 @@ func main() {
 		ErrorLog: slog.NewLogLogger(c.Log.Handler(), slog.LevelWarn),
 	}))
 
-	m := &autocert.Manager{
-		Cache:      autocert.DirCache("rome-autocert"),
-		Prompt:     autocert.AcceptTOS,
-		Email:      "rome-autocert@filippo.io",
-		HostPolicy: autocert.HostWhitelist("rome.ct.filippo.io"),
-	}
+	/*
+		m := &autocert.Manager{
+			Cache:      autocert.DirCache("rome-autocert"),
+			Prompt:     autocert.AcceptTOS,
+			Email:      "rome-autocert@filippo.io",
+			HostPolicy: autocert.HostWhitelist("127.0.0.1", "localhost"),
+		}
+	*/
 	s := &http.Server{
-		Addr:         ":https",
-		TLSConfig:    m.TLSConfig(),
+		Addr: ":8443",
+		//TLSConfig:    m.TLSConfig(),
 		Handler:      mux,
 		ReadTimeout:  5 * time.Second,
 		WriteTimeout: 15 * time.Second,
 	}
 
 	go func() {
-		log.Println("ListenAndServeTLS:", s.ListenAndServeTLS("", ""))
+		log.Println("ListenAndServeTLS:", s.ListenAndServeTLS("ca.pem", "key.pem"))
 		stop()
 	}()
 	log.Println("RunSequencer:", l.RunSequencer(ctx, 1*time.Second))
